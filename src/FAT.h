@@ -1,6 +1,7 @@
 #pragma once
 #include "util.h"
 #include <string>
+#include <vector>
 
 //pocitame s FAT32 MAX - tedy horni 4 hodnoty
 enum clusterTypes :int32
@@ -21,14 +22,14 @@ struct BootRecord
     char signature[9];              //login autora FS
 };// 272B
 
-  //pokud bude ve FAT FAT_DIRECTORY, budou na disku v daném clusteru uloženy struktury o velikosti sizeof(directory) = 24B
+//pokud bude ve FAT FAT_DIRECTORY, budou na disku v daném clusteru uloženy struktury o velikosti sizeof(directory) = 24B
 struct Directory
 {
     char name[13];                  //jméno souboru, nebo adresáøe ve tvaru 8.3'/0' 12 + 1
     bool isFile;                    //identifikace zda je soubor (TRUE), nebo adresáø (FALSE)
     int32 size;                   //velikost položky, u adresáøe 0
     int32 start_cluster;          //poèáteèní cluster položky
-};// 24B
+};// 22B
 
 
 class FAT
@@ -57,6 +58,8 @@ public:
     void clearCluster(int32 cluster);
     void updateCluster(Node* node);
     void removeFromFatTables(int32 cluster, uint8 tableIndex, clusterTypes last);
+    int32 findFreeCluster();
+    void findFreeClusters(std::vector<int32>& clusters, uint32 nrCluster);
 private:
     BootRecord br;
     int32** fatTables;
