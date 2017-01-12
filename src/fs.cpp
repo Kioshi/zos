@@ -16,3 +16,9 @@ Node::~Node()
     for (auto node : childs)
         delete node;
 }
+
+void Node::addChild(Node* child)
+{
+    Guard guard(_lock);
+    childs.push_back(child);
+}

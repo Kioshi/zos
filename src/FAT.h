@@ -1,7 +1,11 @@
 #pragma once
 #include "util.h"
 #include <string>
+#include <mutex>
+#include <atomic>
+#include <deque>
 #include <vector>
+#include "LockFree.h"
 
 //pocitame s FAT32 MAX - tedy horni 4 hodnoty
 enum clusterTypes :int32
@@ -37,22 +41,17 @@ class FAT
 public:
     FAT(std::string filename);
     ~FAT();
-
+private:
     void loadBootRecod();
     void loadFatTables();
     void loadFS();
     void loadDir(class Node* root);
 
-    void addFile(std::string file, std::string fatDir);
-    void createDir(std::string dir, std::string parentDir);
-    void remove(std::string name, clusterTypes type);
-    void printFileClusters(std::string fileName);
+    void dirLoader();
 
-    void printFile(std::string fileName);
     void printFile(Node* file);
     Node* find(Node* curr, std::string fileName);
 
-    void printFat();
     void print(Node* node, uint32 level);
     void updateFatTables();
     void clearCluster(int32 cluster);
@@ -60,6 +59,14 @@ public:
     void removeFromFatTables(int32 cluster, uint8 tableIndex, clusterTypes last);
     int32 findFreeCluster();
     void findFreeClusters(std::vector<int32>& clusters, uint32 nrCluster);
+    void secureLoadDirs(Directory*buffer, long offset);
+public:
+    void addFile(std::string file, std::string fatDir);
+    void createDir(std::string dir, std::string parentDir);
+    void remove(std::string name, clusterTypes type);
+    void printFileClusters(std::string fileName);
+    void printFile(std::string fileName);
+    void printFat();
 private:
     BootRecord br;
     int32** fatTables;
@@ -67,4 +74,12 @@ private:
     uint32 maxDirs;
     uint32 dataStart;
     Node* root;
+
+    std::mutex loadLock;
+    std::mutex dirsLock;
+    std::mutex condLock;
+    std::condition_variable condition;
+    std::deque<Node*> dirsToLoad;
+    std::atomic<uint32> working;
+    std::atomic<uint32> dirs;
 };

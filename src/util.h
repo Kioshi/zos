@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-//#include <mutex>
+#include <mutex>
 
 typedef uint64_t uint64;
 typedef uint32_t uint32;
@@ -10,4 +10,9 @@ typedef int16_t int16;
 typedef uint8_t uint8;
 typedef int8_t int8;
 
-//typedef std::lock_guard<std::mutex> Guard;
+typedef std::unique_lock<std::mutex> Guard;
+
+enum
+{
+    MAX_THREADS = 20
+};

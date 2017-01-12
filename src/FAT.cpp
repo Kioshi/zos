@@ -6,6 +6,8 @@
 FAT::FAT(std::string filename)
     : fatTables(nullptr)
     , root(nullptr)
+    , working(0)
+    , dirs(0)
 {
     file = fopen(filename.c_str(), "r+b");
     if (!file)
@@ -22,6 +24,7 @@ void FAT::loadBootRecod()
     if (!res)
         throw std::runtime_error("Error while reading boot record!");
     maxDirs = br.cluster_size / sizeof(Directory);
+
 }
 
 void FAT::loadFatTables()
@@ -40,37 +43,94 @@ void FAT::loadFatTables()
     dataStart = ftell(file);
 }
 
+void FAT::secureLoadDirs(Directory*buffer, long offset)
+{
+    Guard guard(loadLock);
+    fseek(file, offset, SEEK_SET);
+    fread(buffer, sizeof(Directory)*maxDirs, 1, file);
+}
+
+void FAT::dirLoader()
+{
+    do
+    {
+        Node* node = nullptr;
+        {
+            // Condition lock
+            Guard g1(condLock);
+            // If someone still working and have no work to be done wait for signal
+            while (dirs <= 0 && working)
+                condition.wait(g1);
+
+            // Critic section lock
+            Guard g2(dirsLock);
+            // Retrieve node from workload if there is any
+            if (dirs)
+            {
+                working++;
+                dirs--;
+                node = dirsToLoad.front();
+                dirsToLoad.pop_front();
+            }
+            // End of block call Guards destructors and free locks
+        }
+        // If we got node do some work
+        if (node)
+            loadDir(node);
+    }
+    // Well if others working it would be nice if this thread joined too
+    while (working || dirs);
+}
+
 void FAT::loadFS()
 {
     root = new Node("", 0, false, 0, nullptr);
-    loadDir(root);
+    dirsToLoad.push_back(root);
+    dirs++;
+
+    std::vector<std::thread*> threads;
+    for (uint8 i = 0; i < MAX_THREADS; i++)
+        threads.push_back(new std::thread(&FAT::dirLoader,this));
+
+    for (auto* thread : threads)
+        thread->join();
 }
 
 void FAT::loadDir(Node* parent)
 {
-    fseek(file, dataStart + parent->cluster * br.cluster_size, SEEK_SET);
-    std::vector < Node*> dirs;
+    Directory* directories = new Directory[maxDirs];
+    memset(directories, 0, sizeof(Directory)*maxDirs);
+    secureLoadDirs(directories, dataStart + parent->cluster * br.cluster_size);
     for (uint32 i = 0; i < maxDirs; i++)
     {
-        Directory dir;
-        size_t res = fread(&dir, sizeof(Directory), 1, file);
-        // Since directory is not aligned, we cant check res (on win)
-        /*if (!res)
-            throw std::runtime_error("Error while reading directory!");
-        */
-
+        Directory& dir = directories[i];
+        // If start cluester is not root
         if (dir.start_cluster != 0)
         {
             Node* child = new Node(dir.name, dir.start_cluster, dir.isFile, dir.size, parent);
-            parent->childs.push_back(child);
+            parent->addChild(child);
+            // New dir found, yay more work to do
             if (!dir.isFile)
-                dirs.push_back(child);
+            {
+                {
+                    // Critical section lock
+                    Guard guard(dirsLock);
+                    dirs++;
+                    dirsToLoad.push_back(child);
+                }
+                // Wake one consumer
+                condition.notify_one();
+
+            }
         }
+        // Otherwise assume everything is fine and we just got to end of dir list filled with zeros
         else
             break;
     }
-    for (auto node : dirs)
-        loadDir(node);
+
+    // If noone is working that mean all work is done, its time wake everyone and have a party, lets hope everyone joins
+    if (--working == 0)
+        condition.notify_all();
 }
 
 FAT::~FAT()
