@@ -5,7 +5,7 @@
 #include <atomic>
 #include <deque>
 #include <vector>
-#include "LockFree.h"
+#include <condition_variable>
 
 //pocitame s FAT32 MAX - tedy horni 4 hodnoty
 enum clusterTypes :int32
@@ -67,6 +67,8 @@ public:
     void printFileClusters(std::string fileName);
     void printFile(std::string fileName);
     void printFat();
+
+    static uint8 max_threads;
 private:
     BootRecord br;
     int32** fatTables;

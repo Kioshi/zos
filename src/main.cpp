@@ -1,5 +1,7 @@
 #include <iostream>
 #include "FAT.h"
+#include <cstring>
+#include <algorithm>
 
 bool validateArguments(int argc, char *argv[])
 {
@@ -42,6 +44,9 @@ bool validateArguments(int argc, char *argv[])
             return false;
         }
         break;
+    case 't':
+        FAT::max_threads = std::max(atoi(argv[3]), 1);
+        break;
     default:
         std::cout << "Wrong command" << std::endl;
         return false;
@@ -52,6 +57,7 @@ bool validateArguments(int argc, char *argv[])
 
 int main(int argc, char *argv[]) 
 {
+    FAT::max_threads = MAX_THREADS;
     if (!validateArguments(argc, argv))
         return 1;
     try

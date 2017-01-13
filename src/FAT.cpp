@@ -2,7 +2,12 @@
 #include "fs.h"
 
 #include <iostream>
+#include <chrono>
+#include <cstring>
+#include <thread>
+#include <algorithm>
 
+uint8 FAT::max_threads;
 FAT::FAT(std::string filename)
     : fatTables(nullptr)
     , root(nullptr)
@@ -43,6 +48,24 @@ void FAT::loadFatTables()
     dataStart = ftell(file);
 }
 
+
+void FAT::loadFS()
+{
+    root = new Node("", 0, false, 0, nullptr);
+    dirsToLoad.push_back(root);
+    dirs++;
+
+    std::vector<std::thread*> threads;
+    //std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    for (uint8 i = 0; i < max_threads; i++)
+        threads.push_back(new std::thread(&FAT::dirLoader,this));
+
+    for (auto* thread : threads)
+        thread->join();
+    //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    //std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
+}
+
 void FAT::secureLoadDirs(Directory*buffer, long offset)
 {
     Guard guard(loadLock);
@@ -81,21 +104,6 @@ void FAT::dirLoader()
     // Well if others working it would be nice if this thread joined too
     while (working || dirs);
 }
-
-void FAT::loadFS()
-{
-    root = new Node("", 0, false, 0, nullptr);
-    dirsToLoad.push_back(root);
-    dirs++;
-
-    std::vector<std::thread*> threads;
-    for (uint8 i = 0; i < MAX_THREADS; i++)
-        threads.push_back(new std::thread(&FAT::dirLoader,this));
-
-    for (auto* thread : threads)
-        thread->join();
-}
-
 void FAT::loadDir(Node* parent)
 {
     Directory* directories = new Directory[maxDirs];
@@ -135,6 +143,8 @@ void FAT::loadDir(Node* parent)
 
 FAT::~FAT()
 {
+    fclose(file);
+
     if (fatTables)
     {
         for (uint8 i = 0; i < br.fat_copies; i++)
@@ -146,7 +156,6 @@ FAT::~FAT()
     if (root)
         delete root;
 
-    fclose(file);
 }
 
 void FAT::addFile(std::string filename, std::string fatDir)
