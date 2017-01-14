@@ -65,7 +65,7 @@ bool validateArguments(int argc, char *argv[])
 int main(int argc, char *argv[]) 
 {
     // Seed randomizer
-    std::srand(time(NULL));
+    std::srand((unsigned int)time(NULL));
     // Initialize max_threads to default value
     FAT::max_threads = THREADS;
 

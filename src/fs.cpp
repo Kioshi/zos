@@ -17,6 +17,7 @@ Node::~Node()
         delete node;
 }
 
+// Secure add children from multiple threads
 void Node::addChild(Node* child)
 {
     Guard guard(_lock);
