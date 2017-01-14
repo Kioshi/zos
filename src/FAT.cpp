@@ -6,6 +6,7 @@
 #include <cstring>
 #include <thread>
 #include <algorithm>
+#include <random>
 
 uint8 FAT::max_threads;
 FAT::FAT(std::string filename)
@@ -61,7 +62,10 @@ void FAT::loadFS()
         threads.push_back(new std::thread(&FAT::dirLoader,this));
 
     for (auto* thread : threads)
+    {
         thread->join();
+        delete thread;
+    }
     //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     //std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
 }
@@ -135,6 +139,7 @@ void FAT::loadDir(Node* parent)
         else
             break;
     }
+    delete[] directories;
 
     // If noone is working that mean all work is done, its time wake everyone and have a party, lets hope everyone joins
     if (--working == 0)
@@ -187,7 +192,6 @@ void FAT::addFile(std::string filename, std::string fatDir)
     {
         memset(buffer, 0, br.cluster_size);
         size_t res = fread(buffer, br.cluster_size, 1, newFile);
-        std::cout << buffer << std::endl;
         fseek(file, dataStart + clusters[i]*(br.cluster_size), SEEK_SET);
         fwrite(buffer, br.cluster_size, 1, file);
 
@@ -349,18 +353,18 @@ void FAT::printFile(std::string fileName)
     else
     {
         std::cout << file->name << " ";
-        printFile(file);
+        _printFile(file);
         std::cout << std::endl;
     }
 }
 
-void FAT::printFile(Node* node)
+void FAT::_printFile(Node* node)
 {
     int32 cluster = node->cluster;
-    char* buffer = new char[br.cluster_size];
+    char* buffer = new char[br.cluster_size+1];
     do
     {
-        memset(buffer, 0, sizeof(buffer));
+        memset(buffer, 0, br.cluster_size + 1);
         fseek(file, dataStart + cluster*(br.cluster_size), SEEK_SET);
         size_t res = fread(buffer, sizeof(char), br.cluster_size, file);
         if (res != br.cluster_size)
@@ -368,10 +372,55 @@ void FAT::printFile(Node* node)
             delete[] buffer;
             throw std::runtime_error("Failed read of cluster!");
         }
+
+        if (!checkCluster(buffer,cluster))
+        {
+            std::cout << std::endl << "Bad cluster, data from it are lost. Removing file." << std::endl;
+            remove(absName(node), FAT_FILE_END);
+            for (uint8 i = 0; i <br.fat_copies; i++)
+                fatTables[i][cluster] = FAT_BAD_CLUSTER;
+            updateFatTables();
+            break;
+        }
         std::cout << buffer;
         cluster = fatTables[0][cluster];
     } while (cluster != FAT_FILE_END);
     delete[] buffer;
+}
+
+bool FAT::checkCluster(char* buffer, int32 cluster)
+{
+    // Compare first and last 8 bytes, if they dont match or doesnt contain letter F, cluster is fine
+    if (memcmp(buffer, buffer + br.cluster_size - 8, 8) != 0 || buffer[0] != 'F')
+        return true;
+
+    std::random_device rd;
+    std::mt19937 eng(rd());
+    std::uniform_int_distribution<> distr(0, RANDOM_RANGE);
+
+    // Rolling a dice, if result is zero we repaired it
+    uint32 random = distr(eng);
+    if (!random)
+    {
+        // Set to spaces so next time we dont detect it as bad sector next time
+        memset(buffer, ' ', 8);
+        memset(buffer + br.cluster_size - 8, ' ', 8);
+        fseek(file, dataStart + cluster*(br.cluster_size), SEEK_SET);
+        fwrite(buffer, sizeof(char)* br.cluster_size, 1, file);
+        return true;
+    }
+
+    // Cluster is bad
+    return false;
+}
+
+
+std::string FAT::absName(Node* node)
+{
+    if (!node->parent)
+        return node->name;
+
+    return absName(node->parent) + "/" + node->name;
 }
 
 Node* FAT::find(Node* curr, std::string fileName)

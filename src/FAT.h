@@ -49,7 +49,7 @@ private:
 
     void dirLoader();
 
-    void printFile(Node* file);
+    void _printFile(Node* file);
     Node* find(Node* curr, std::string fileName);
 
     void print(Node* node, uint32 level);
@@ -67,7 +67,8 @@ public:
     void printFileClusters(std::string fileName);
     void printFile(std::string fileName);
     void printFat();
-
+    bool checkCluster(char* buffer, int32 cluster);
+    std::string absName(Node* node);
     static uint8 max_threads;
 private:
     BootRecord br;

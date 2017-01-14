@@ -14,5 +14,6 @@ typedef std::unique_lock<std::mutex> Guard;
 
 enum
 {
-    MAX_THREADS = 3
+    THREADS = 3,
+    RANDOM_RANGE = 100
 };
