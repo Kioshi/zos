@@ -58,7 +58,7 @@ private:
     void updateCluster(Node* node);
     void removeFromFatTables(int32 cluster, uint8 tableIndex, clusterTypes last);
     int32 findFreeCluster();
-    void findFreeClusters(std::vector<int32>& clusters, uint32 nrCluster);
+    void findFreeClusters(std::vector<int32>& clusters, int32 nrCluster);
     void secureLoadDirs(Directory*buffer, long offset);
 public:
     void addFile(std::string file, std::string fatDir);
@@ -69,6 +69,7 @@ public:
     void printFat();
     bool checkCluster(char* buffer, int32 cluster);
     std::string absName(Node* node);
+    static void extractFilename(std::string& str);
     static uint8 max_threads;
 private:
     BootRecord br;

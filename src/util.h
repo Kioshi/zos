@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 #include <mutex>
+#include <string>
+#include <cstddef>
 
 typedef uint64_t uint64;
 typedef uint32_t uint32;
@@ -17,3 +19,4 @@ enum
     THREADS = 3,
     RANDOM_RANGE = 100
 };
+

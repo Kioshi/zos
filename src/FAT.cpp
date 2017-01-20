@@ -115,6 +115,7 @@ void FAT::dirLoader()
     }
     // Well if others working it would be nice if this thread joined too
     while (working || dirs);
+    condition.notify_all();
 }
 
 // Load dir content into filesystem
@@ -226,6 +227,7 @@ void FAT::addFile(std::string filename, std::string fatDir)
             fatTables[j][clusters[i]] = (i == clusters.size() - 1 ? FAT_FILE_END: clusters[i+1]);
     }
 
+    extractFilename(filename);
     // Push new file into filesystem
     node->childs.push_back(new Node(filename, clusters.front(), true, size, node));
     updateFatTables();
@@ -333,7 +335,7 @@ int32 FAT::findFreeCluster()
 }
 
 // Find free number clusters 
-void FAT::findFreeClusters(std::vector<int32>& clusters, uint32 nrCluster)
+void FAT::findFreeClusters(std::vector<int32>& clusters, int32 nrCluster)
 {
     for (int32 i = 1; i < br.usable_cluster_count; i++)
     {
@@ -415,9 +417,9 @@ void FAT::printFile(std::string fileName)
         std::cout << "Path not found" << std::endl;
     else
     {
-        std::cout << file->name << " ";
+        //std::cout << file->name << " ";
         _printFile(file);
-        std::cout << std::endl;
+        //std::cout << std::endl;
     }
 }
 
@@ -539,4 +541,10 @@ void FAT::print(Node* node, uint32 level)
     {
         std::cout << " " << node->cluster << " " << ((node->size / br.cluster_size) + !!(node->size % br.cluster_size)) << std::endl;
     }
+}
+
+void FAT::extractFilename(std::string& str)
+{
+    size_t found = str.find_last_of("/\\");
+    str = str.substr(found + 1);
 }
