@@ -34,6 +34,13 @@ void FAT::loadBootRecod()
 
     // Calculate maximum number of dirs in cluster for later user
     maxDirs = br.cluster_size / sizeof(Directory);
+    if (br.cluster_size % sizeof(Directory) < 8)
+    {
+        if (maxDirs <= 1)
+            throw std::runtime_error("Not enough room for directories.");
+        else
+            maxDirs--;
+    }
 }
 
 // Load fat tables into multi dimensional array
@@ -61,7 +68,6 @@ void FAT::loadFS()
     dirsToLoad.push_back(root);
     dirs++;
 
-    //std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     // Create worker vectors to parse fat into filesystem
     std::vector<std::thread*> threads;
     for (uint8 i = 0; i < std::max((uint8)1,max_threads); i++)
@@ -73,15 +79,16 @@ void FAT::loadFS()
         thread->join();
         delete thread;
     }
-    //std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count() << std::endl;
+    // Relocate bad dirs
+    relocateBadDirsClusters();
 }
 
 // Load directories into buffer from file offset, locking file so other threads doesnt seek somewhere else before fread is executed
-void FAT::secureLoadDirs(Directory*buffer, long offset)
+void FAT::secureLoadDirs(char*buffer, long offset)
 {
     Guard guard(loadLock);
     fseek(file, offset, SEEK_SET);
-    fread(buffer, sizeof(Directory)*maxDirs, 1, file);
+    fread(buffer, br.cluster_size, 1, file);
 }
 
 // Consumer method for threads
@@ -121,13 +128,23 @@ void FAT::dirLoader()
 // Load dir content into filesystem
 void FAT::loadDir(Node* parent)
 {
+    char* buffer = new char[br.cluster_size];
+    // Lock then seek and load directories
+    secureLoadDirs(buffer, dataStart + parent->cluster * br.cluster_size);
+    if (isClusterBad(buffer, parent->cluster))
+    {
+        Guard g(badClustersLock);
+        badClusters.push_back(parent);
+    }
+
     Directory* directories = new Directory[maxDirs];
     memset(directories, 0, sizeof(Directory)*maxDirs);
-    // Lock then seek and load directories
-    secureLoadDirs(directories, dataStart + parent->cluster * br.cluster_size);
+    memcpy(directories, buffer, sizeof(Directory)*maxDirs);
+
     for (uint32 i = 0; i < maxDirs; i++)
     {
         Directory& dir = directories[i];
+        dir.name[12] = 0;
         // If start cluester is not root
         if (dir.start_cluster != 0)
         {
@@ -152,6 +169,7 @@ void FAT::loadDir(Node* parent)
             break;
     }
     delete[] directories;
+    delete[] buffer;
 
     // If noone is working that mean all work is done, its time wake everyone and have a party, lets hope everyone joins
     if (--working == 0)
@@ -182,10 +200,15 @@ void FAT::addFile(std::string filename, std::string fatDir)
     if (fatDir[0] == '/')
         fatDir = fatDir.substr(1);
 
+    // Dont need to / on end of path
+    if (fatDir[fatDir.length() - 1] == '/')
+        fatDir = fatDir.substr(0, fatDir.length() - 1);
     // Try to find node according to specified path
     Node* node = find(root, fatDir);
     if (!node || node->isFile)
         throw std::runtime_error("Path not found");
+    if (Node* existing = find(node, filename))
+        throw std::runtime_error("File/Dir with same name already in path");
 
     // Open new file
     FILE* newFile= fopen(filename.c_str(), "rb");
@@ -235,6 +258,7 @@ void FAT::addFile(std::string filename, std::string fatDir)
 
     delete[] buffer;
     fclose(newFile);
+    std::cout << "OK" << std::endl;
 }
 
 // Create dir in parentDir
@@ -244,10 +268,19 @@ void FAT::createDir(std::string dir, std::string parentDir)
     if (parentDir[0] == '/')
         parentDir = parentDir.substr(1);
 
+    // Dont save / on end of the name
+    if (dir[dir.length() - 1] == '/')
+        dir = dir.substr(0, dir.length() - 1);
+    // Dont need to / on end of path
+    if (parentDir[parentDir.length() - 1] == '/')
+        parentDir = parentDir.substr(0, parentDir.length() - 1);
+
     // Try to find node according to specified path
     Node* node = parentDir.empty() ? root : find(root, parentDir);
     if (!node || node->isFile)
         std::cout << "Path not found" << std::endl;
+    else if (Node* existing = find(node, dir))
+        std::cout << "File/Dir with same name already in path" << std::endl;
     else
     {
         // Find a free cluster
@@ -303,7 +336,7 @@ void FAT::updateCluster(Node* node)
         Directory dir;
         dir.isFile = n->isFile;
         memset(dir.name, 0, 13);
-        strcpy(dir.name, n->name.c_str());
+        strncpy(dir.name, n->name.c_str(),12);
         dir.size = n->size;
         dir.start_cluster = n->cluster;         
    
@@ -352,6 +385,11 @@ void FAT::remove(std::string name, clusterTypes type)
     // Remove first / since our root have empty name
     if (name[0] == '/')
         name = name.substr(1);
+
+    // Dont need to / on end of path
+    if (type == FAT_DIRECTORY && name[name.length() - 1] == '/')
+        name = name.substr(0, name.length() - 1);
+
     // Try to find file/dir to remove
     Node* node = find(root, name);
     // Validate
@@ -427,6 +465,7 @@ void FAT::printFile(std::string fileName)
 void FAT::_printFile(Node* node)
 {
     int32 cluster = node->cluster;
+    int32 prevCluster = -1;
     char* buffer = new char[br.cluster_size+1];
     do
     {
@@ -439,46 +478,71 @@ void FAT::_printFile(Node* node)
             throw std::runtime_error("Failed read of cluster!");
         }
 
-        if (!checkCluster(buffer,cluster))
+        if (isClusterBad(buffer, cluster))
         {
-            std::cout << std::endl << "Bad cluster, data from it are lost. Removing file." << std::endl;
-            remove(absName(node), FAT_FILE_END);
-            for (uint8 i = 0; i <br.fat_copies; i++)
-                fatTables[i][cluster] = FAT_BAD_CLUSTER;
+            std::cout << std::endl << "Relocating bad cluster!" << std::endl;
+            int32 newCluster = findFreeCluster();
+            if (cluster == -1)
+                throw std::runtime_error("Not enough room for realocate bad cluster!");
+            if (prevCluster == -1)
+            {
+                node->cluster = newCluster;
+                if (node->parent)
+                    updateCluster(node->parent);
+            }
+            for (uint8 i = 0; i < br.fat_copies; i++)
+            {
+                fatTables[i][newCluster] = fatTables[i][cluster];
+                if (prevCluster != -1)
+                    fatTables[i][prevCluster] = newCluster;
+            }
+            moveCluster(cluster, newCluster);
+            prevCluster = newCluster;
+            fatTables[0][cluster] = FAT_BAD_CLUSTER;
+            cluster = fatTables[0][newCluster];
             updateFatTables();
-            break;
+            std::cout << buffer;
+            continue;
         }
         std::cout << buffer;
+        prevCluster = cluster;
         cluster = fatTables[0][cluster];
     } while (cluster != FAT_FILE_END);
     delete[] buffer;
 }
 
 // Check if cluster is bad and try to fix it
-bool FAT::checkCluster(char* buffer, int32 cluster)
+bool FAT::isClusterBad(char* buffer, int32 cluster)
 {
     // Compare first and last 8 bytes, if they dont match or doesnt contain letter F, cluster is fine
-    if (memcmp(buffer, buffer + br.cluster_size - 8, 8) != 0 || buffer[0] != 'F')
-        return true;
+    for (uint8 i = 0; i < 8; i++)
+        if (buffer[i] != buffer[br.cluster_size - 8 + i] || buffer[i] != 'F')
+            return false;
 
     std::random_device rd;
     std::mt19937 eng(rd());
     std::uniform_int_distribution<> distr(0, RANDOM_RANGE);
 
+    {
+        // Set to f so next time we dont detect it as bad sector next time
+        memset(buffer, 'f', 8);
+        memset(buffer + br.cluster_size - 8, 'f', 8);
+        Guard guard(loadLock);
+        fseek(file, dataStart + cluster*(br.cluster_size), SEEK_SET);
+        fwrite(buffer, sizeof(char)* br.cluster_size, 1, file);
+    }
+
+    std::cout << "\nFirst and last 8 bytes lost!";
     // Rolling a dice, if result is zero we repaired it
     uint32 random = distr(eng);
     if (!random)
     {
-        // Set to spaces so next time we dont detect it as bad sector next time
-        memset(buffer, ' ', 8);
-        memset(buffer + br.cluster_size - 8, ' ', 8);
-        fseek(file, dataStart + cluster*(br.cluster_size), SEEK_SET);
-        fwrite(buffer, sizeof(char)* br.cluster_size, 1, file);
-        return true;
+        std::cout << "\nFixed bad cluster!\n";
+        return false;
     }
 
     // Cluster is bad
-    return false;
+    return true;
 }
 
 // Get name with absolute path of node
@@ -547,4 +611,35 @@ void FAT::extractFilename(std::string& str)
 {
     size_t found = str.find_last_of("/\\");
     str = str.substr(found + 1);
+}
+
+void FAT::relocateBadDirsClusters()
+{
+    for (auto node : badClusters)
+    {
+        int32 cluster = findFreeCluster();
+        if (cluster == -1)
+            throw std::runtime_error("Not enough room for realocate bad cluster!");
+        moveCluster(node->cluster, cluster);
+        for (int8 i = 0; i < br.fat_copies; i++)
+            fatTables[i][node->cluster] = FAT_BAD_CLUSTER;
+        updateFatTables();
+        node->cluster = cluster;
+        if (node->parent)
+            updateCluster(node->parent);
+        else
+            throw std::runtime_error("Corrupted FAT!");
+    }
+    badClusters.clear();
+}
+
+void FAT::moveCluster(int32 oldCluster, int32 newCluster)
+{
+    char* buffer = new char[br.cluster_size];
+    fseek(file, dataStart + oldCluster*(br.cluster_size), SEEK_SET);
+    fread(buffer, br.cluster_size, 1, file);
+    fseek(file, dataStart + newCluster*(br.cluster_size), SEEK_SET);
+    fwrite(buffer, br.cluster_size, 1, file);
+    delete[] buffer;
+    clearCluster(oldCluster);
 }

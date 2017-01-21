@@ -76,6 +76,11 @@ bool validateArguments(int argc, char *argv[])
             std::cout << "Maximum name length is 12 characters" << std::endl;
             return false;
         }
+        if (strncmp(argv[3], "ffffffff", 8)==0)
+        {
+            std::cout << "Name ffffffff for file is forbidden!" << std::endl;
+            return false;
+        }
         // Check if arguments are <fatfile> <command> <name> <path>
         if (argc != 5)
         {
@@ -89,6 +94,11 @@ bool validateArguments(int argc, char *argv[])
         if (strlen(argv[3]) >= 13)
         {
             std::cout << "Maximum name length is 12 characters" << std::endl;
+            return false;
+        }
+        if (strncmp(argv[3], "ffffffff", 8)==0)
+        {
+            std::cout << "Name ffffffff for directory is forbidden!" << std::endl;
             return false;
         }
         // Check if arguments are <fatfile> <command> <name> <path>

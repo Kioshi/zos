@@ -59,7 +59,9 @@ private:
     void removeFromFatTables(int32 cluster, uint8 tableIndex, clusterTypes last);
     int32 findFreeCluster();
     void findFreeClusters(std::vector<int32>& clusters, int32 nrCluster);
-    void secureLoadDirs(Directory*buffer, long offset);
+    void secureLoadDirs(char*buffer, long offset);
+    void relocateBadDirsClusters();
+    void moveCluster(int32 oldCluster, int32 newCluster);
 public:
     void addFile(std::string file, std::string fatDir);
     void createDir(std::string dir, std::string parentDir);
@@ -67,7 +69,7 @@ public:
     void printFileClusters(std::string fileName);
     void printFile(std::string fileName);
     void printFat();
-    bool checkCluster(char* buffer, int32 cluster);
+    bool isClusterBad(char* buffer, int32 cluster);
     std::string absName(Node* node);
     static void extractFilename(std::string& str);
     static uint8 max_threads;
@@ -82,8 +84,10 @@ private:
     std::mutex loadLock;
     std::mutex dirsLock;
     std::mutex condLock;
+    std::mutex badClustersLock;
     std::condition_variable condition;
     std::deque<Node*> dirsToLoad;
+    std::deque<Node*> badClusters;
     std::atomic<uint32> working;
     std::atomic<uint32> dirs;
 };
