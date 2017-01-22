@@ -17,7 +17,7 @@ void create(int16 cluster_count, int16 cluster_size)
     br.cluster_size = cluster_size;
     br.usable_cluster_count = cluster_count;
     br.fat_type = 8;
-    br.fat_copies = 1;
+    br.fat_copies = 2;
 
     char* cluster = new char[cluster_size];
     memset(cluster, 0, cluster_size);
