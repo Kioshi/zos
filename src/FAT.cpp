@@ -615,6 +615,8 @@ void FAT::extractFilename(std::string& str)
 
 void FAT::relocateBadDirsClusters()
 {
+    if (!badClusters.empty())
+        std::cout << std::endl;
     for (auto node : badClusters)
     {
         int32 cluster = findFreeCluster();
@@ -622,8 +624,12 @@ void FAT::relocateBadDirsClusters()
             throw std::runtime_error("Not enough room for realocate bad cluster!");
         moveCluster(node->cluster, cluster);
         for (int8 i = 0; i < br.fat_copies; i++)
+        {
+            fatTables[i][cluster] = FAT_DIRECTORY;
             fatTables[i][node->cluster] = FAT_BAD_CLUSTER;
+        }
         updateFatTables();
+        std::cout << "Moving bad dir cluster from " << (int)node->cluster << " to " << (int)cluster << std::endl;
         node->cluster = cluster;
         if (node->parent)
             updateCluster(node->parent);
@@ -642,4 +648,42 @@ void FAT::moveCluster(int32 oldCluster, int32 newCluster)
     fwrite(buffer, br.cluster_size, 1, file);
     delete[] buffer;
     clearCluster(oldCluster);
+}
+
+void FAT::corruptCluster(int32 cluster)
+{
+    char* buffer = new char[br.cluster_size];
+    fseek(file, dataStart + cluster*(br.cluster_size), SEEK_SET);
+    fread(buffer, sizeof(char)* br.cluster_size, 1, file);
+    memset(buffer, 'F', 8);
+    memset(buffer + br.cluster_size - 8, 'F', 8);
+    fseek(file, dataStart + cluster*(br.cluster_size), SEEK_SET);
+    fwrite(buffer, sizeof(char)* br.cluster_size, 1, file);
+}
+
+void FAT::printFirstFewFatRows()
+{
+    for (int i = 0; i < 20; i++)
+    {
+        std::cout << i << ": ";
+        switch (fatTables[0][i])
+        {
+            case FAT_BAD_CLUSTER:
+                std::cout << "Bad cluster";
+                break;
+            case FAT_DIRECTORY:
+                std::cout << "Directory";
+                break;
+            case FAT_FILE_END:
+                std::cout << "File end";
+                break;
+            case FAT_UNUSED:
+                std::cout << "Unused";
+                break;
+            default:
+                std::cout << (int)fatTables[0][i];
+                break;
+        }
+        std::cout << std::endl;
+    }
 }

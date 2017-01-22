@@ -134,6 +134,16 @@ bool validateArguments(int argc, char *argv[])
     case 't':
         FAT::max_threads = std::max(atoi(argv[3]), 1);
         break;
+    case 'x':
+        break;
+    case 'b':
+        if (argc != 4 || atoi(argv[3]) < 0)
+        {
+            std::cout << "Not enough arguments for command (expected 3)" << std::endl;
+            std::cout << "Correct syntax is <fatfile> <command> <cluster number>" << std::endl;
+            return false;
+        }
+        break;
     default:
         std::cout << "Available commands:" << std::endl;
         std::cout << "-a for adding new file to fat" << std::endl;
@@ -158,7 +168,7 @@ int main(int argc, char *argv[])
 
     // Validate arguments
     if (!validateArguments(argc, argv))
-        return 1;
+        return 0;
     try
     {
         // Load fat file
@@ -193,6 +203,12 @@ int main(int argc, char *argv[])
             case 'p':
                 // Print file structure of fat
                 fat.printFat();
+                break;
+            case 'x':
+                fat.printFirstFewFatRows();
+                break;
+            case 'b':
+                fat.corruptCluster(atoi(argv[3]));
                 break;
         }
     }

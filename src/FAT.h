@@ -72,6 +72,9 @@ public:
     bool isClusterBad(char* buffer, int32 cluster);
     std::string absName(Node* node);
     static void extractFilename(std::string& str);
+    void corruptCluster(int32 cluster);
+    void printFirstFewFatRows();
+public:
     static uint8 max_threads;
 private:
     BootRecord br;
